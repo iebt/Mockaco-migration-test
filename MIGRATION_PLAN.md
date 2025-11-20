@@ -75,9 +75,60 @@
 
 ## Phase 2: Update Target Frameworks
 
-**Goal:** Update .csproj files to target .NET 9, then build to identify which dependencies require updates.
+**Goal:** Verify .NET SDK installation, update .csproj files to target .NET 9, then build to identify which dependencies require updates.
 
-### 2.1 Update Target Frameworks
+### 2.1 Verify .NET SDK Installation
+
+Before updating target frameworks, ensure you have .NET 9 SDK installed and properly configured.
+
+#### Check Current .NET SDK
+
+```bash
+dotnet --version
+dotnet --list-sdks
+```
+
+**Expected:** You should see .NET 9.0.x SDK listed.
+
+#### Determine Your .NET Installation Method
+
+**Option A: System-wide Installation (Visual Studio, JetBrains Rider, or Official Installer)**
+
+If you installed .NET via Visual Studio, JetBrains Rider, or the official Microsoft installer, your SDK is system-wide. Skip to section 2.2.
+
+**Option B: asdf Version Manager**
+
+If you use `asdf` to manage .NET versions:
+
+```bash
+# Check if asdf is managing dotnet
+which dotnet
+# If output shows path with .asdf (e.g., /Users/username/.asdf/shims/dotnet), you're using asdf
+
+# List installed .NET versions in asdf
+asdf list dotnet
+
+# If .NET 9 is already installed, set it for this project
+asdf local dotnet 9.0.100
+
+# If .NET 9 is NOT installed, install it first:
+# List available versions
+asdf list all dotnet | grep "^9.0"
+
+# Install .NET 9 SDK
+asdf install dotnet 9.0.100
+
+# Set as project-local version
+asdf local dotnet 9.0.100
+
+# Verify
+dotnet --version
+# Should show 9.0.100 (or your installed 9.0.x version)
+```
+
+**Note:** `asdf local` creates a `.tool-versions` file in your project root.
+
+### 2.2 Update Target Frameworks
 
 **Files to modify:**
 
@@ -90,7 +141,7 @@
 3. **test/Mockaco.AspNetCore.Tests/Mockaco.AspNetCore.Tests.csproj**
    - Change `<TargetFramework>net6.0</TargetFramework>` → `<TargetFramework>net9.0</TargetFramework>`
 
-### 2.2 Verify Build (Expect Errors)
+### 2.3 Verify Build (Expect Errors)
 
 After updating target frameworks, run:
 
