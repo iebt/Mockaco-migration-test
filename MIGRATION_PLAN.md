@@ -20,11 +20,12 @@
 ## Migration Plan Overview
 
 ### Phase 1: Pre-Migration Preparation & Baseline
-### Phase 2: Update Project Files
-### Phase 3: Code Changes
-### Phase 4: Update CI/CD & Infrastructure
-### Phase 5: Validation & Testing
-### Phase 6: Documentation Updates
+### Phase 2: Update Target Frameworks
+### Phase 3: Update NuGet Dependencies (Conservative Approach)
+### Phase 4: Code Changes
+### Phase 5: Update CI/CD & Infrastructure
+### Phase 6: Validation & Testing
+### Phase 7: Documentation Updates
 
 ---
 
@@ -35,25 +36,13 @@
 ### 1.1 Create Migration Baseline
 
 **Tasks:**
-- [ ] Create a git branch for migration work: `git checkout -b feature/migrate-to-net9`
 - [ ] Run full test suite and document current results
   ```bash
   dotnet test --configuration Release --verbosity normal test/Mockaco.AspNetCore.Tests/Mockaco.AspNetCore.Tests.csproj > baseline_tests.log 2>&1
   ```
 - [ ] Build all projects in Release mode and verify outputs
   ```bash
-  dotnet build --configuration Release > baseline_build.log 2>&1
-  ```
-- [ ] Test the packaged dotnet tool locally
-  ```bash
-  dotnet pack src/Mockaco/Mockaco.csproj --configuration Release
-  dotnet tool install --global --add-source ./src/Mockaco/nupkg Mockaco
-  mockaco --help
-  ```
-- [ ] Build and test Docker image
-  ```bash
-  docker build -f src/Mockaco/Docker/Dockerfile -t mockaco:net6-baseline .
-  docker run -p 5000:5000 mockaco:net6-baseline
+  dotnet build --configur****ation Release > baseline_build.log 2>&1
   ```
 - [ ] Document all current warnings/issues in `BASELINE_ISSUES.md`
 
@@ -84,75 +73,155 @@
 
 ---
 
-## Phase 2: Update Project Files
+## Phase 2: Update Target Frameworks
+
+**Goal:** Update .csproj files to target .NET 9, then build to identify which dependencies require updates.
 
 ### 2.1 Update Target Frameworks
 
 **Files to modify:**
 
 1. **src/Mockaco.AspNetCore/Mockaco.AspNetCore.csproj**
-   - Line 4: Change `<TargetFramework>net6.0</TargetFramework>` → `<TargetFramework>net9.0</TargetFramework>`
+   - Change `<TargetFramework>net6.0</TargetFramework>` → `<TargetFramework>net9.0</TargetFramework>`
 
 2. **src/Mockaco/Mockaco.csproj**
-   - Line 4: Change `<TargetFramework>net6.0</TargetFramework>` → `<TargetFramework>net9.0</TargetFramework>`
+   - Change `<TargetFramework>net6.0</TargetFramework>` → `<TargetFramework>net9.0</TargetFramework>`
 
 3. **test/Mockaco.AspNetCore.Tests/Mockaco.AspNetCore.Tests.csproj**
-   - Line 4: Change `<TargetFramework>net6.0</TargetFramework>` → `<TargetFramework>net9.0</TargetFramework>`
+   - Change `<TargetFramework>net6.0</TargetFramework>` → `<TargetFramework>net9.0</TargetFramework>`
 
-### 2.2 Update NuGet Packages
+### 2.2 Verify Build (Expect Errors)
 
-**Priority Updates:**
+After updating target frameworks, run:
 
 ```bash
-# Core packages
+dotnet restore
+dotnet build
+```
+
+**Expected outcome:** Build will likely fail with errors about incompatible package versions. This is normal and expected. The errors will guide which packages need updating in Phase 3.
+
+---
+
+## Phase 3: Update NuGet Dependencies (Conservative Approach)
+
+**Goal:** Update only the packages necessary to build successfully on .NET 9, following a conservative approach.
+
+**Strategy:** Update packages in three tiers based on necessity.
+
+### 3.1 MUST UPDATE (Required for .NET 9)
+
+These packages are framework-specific and must match the .NET version:
+
+| Package | Current | Target | Project | Reason |
+|---------|---------|--------|---------|--------|
+| `Microsoft.Extensions.FileProviders.Physical` | 6.0.0 | 9.0.0 | Mockaco | Framework-versioned package |
+
+**Update commands:**
+
+```bash
+dotnet add src/Mockaco/Mockaco.csproj package Microsoft.Extensions.FileProviders.Physical
+```
+
+**Verify:** Run `dotnet build` after each update to check if it resolves errors.
+
+### 3.2 RECOMMENDED UPDATE (Compatibility & Performance)
+
+These packages should be updated for better .NET 9 compatibility, but old versions might work:
+
+| Package | Current | Target | Project | Reason |
+|---------|---------|--------|---------|--------|
+| `Microsoft.CodeAnalysis.CSharp.Scripting` | 4.6.0 | 4.12.0+ | Mockaco.AspNetCore | Better C# 12 support, .NET 9 optimizations |
+| `GitVersion.MsBuild` | 5.12.0 | 6.x | Mockaco.AspNetCore | Build tool compatibility |
+| `Microsoft.NET.Test.Sdk` | - | 17.11.0+ | Tests | Test infrastructure |
+| `coverlet.collector` | - | 6.0.2+ | Tests | Code coverage for .NET 9 |
+
+**Update commands (only if build errors occur or you want new features):**
+
+```bash
+# Core library
 dotnet add src/Mockaco.AspNetCore/Mockaco.AspNetCore.csproj package Microsoft.CodeAnalysis.CSharp.Scripting
 dotnet add src/Mockaco.AspNetCore/Mockaco.AspNetCore.csproj package GitVersion.MsBuild
-dotnet add src/Mockaco/Mockaco.csproj package Microsoft.Extensions.FileProviders.Physical
 
-# Test packages
+# Test project
 dotnet add test/Mockaco.AspNetCore.Tests/Mockaco.AspNetCore.Tests.csproj package Microsoft.NET.Test.Sdk
-dotnet add test/Mockaco.AspNetCore.Tests/Mockaco.AspNetCore.Tests.csproj package FluentAssertions
-dotnet add test/Mockaco.AspNetCore.Tests/Mockaco.AspNetCore.Tests.csproj package Moq
-dotnet add test/Mockaco.AspNetCore.Tests/Mockaco.AspNetCore.Tests.csproj package Testcontainers
 dotnet add test/Mockaco.AspNetCore.Tests/Mockaco.AspNetCore.Tests.csproj package coverlet.collector
 ```
 
-**Recommended Package Versions:**
+### 3.3 PROBABLY CAN KEEP (Unless Issues Arise)
 
-| Package | Target Version | Notes |
-|---------|---------------|-------|
-| `Microsoft.CodeAnalysis.CSharp.Scripting` | 4.12.0+ | Latest stable for .NET 9 |
-| `GitVersion.MsBuild` | 6.x | Check for .NET 9 support |
-| `Microsoft.Extensions.FileProviders.Physical` | 9.0.0 | Match .NET version |
-| `Microsoft.NET.Test.Sdk` | 17.11.0+ | Latest test SDK |
-| `FluentAssertions` | 6.12.0+ | Latest stable |
-| `Moq` | 4.20.0+ | Latest stable |
-| `Testcontainers` | Latest | Check NuGet for latest |
-| `coverlet.collector` | 6.0.2+ | Latest coverage |
-| `Bogus` | 35.x | Check for updates |
-| `Newtonsoft.Json` | 13.0.3 | Likely compatible as-is |
-| `Polly` | 8.x | Major version update available |
+These packages target .NET Standard or have broad compatibility - only update if you encounter runtime errors or want new features:
 
-**Note:** Verify each package version on NuGet.org before updating.
+| Package | Current | Notes |
+|---------|---------|-------|
+| `Newtonsoft.Json` | 13.0.3 | Targets .NET Standard 2.0 - fully compatible |
+| `Bogus` | 34.0.2 | Works with .NET 9, update to 35.x+ if desired |
+| `Polly` | 7.2.3 | Works, but v8 has improvements (⚠️ breaking changes) |
+| `Serilog.AspNetCore` | 7.0.0 | Check latest version, likely compatible |
+| `FluentAssertions` | 6.11.0 | Usually backward compatible, update if desired |
+| `Moq` | 4.18.4 | Update to 4.20.0+ if issues, otherwise keep |
+| `Testcontainers` | 3.2.0 | Check for .NET 9 compatibility, update if needed |
+| `System.CommandLine` | 2.0.0-beta1 | Still beta, keep unless GA version available |
 
-### 2.3 Create global.json (Recommended)
+**Update commands (only if you encounter issues or want new features):**
 
-Create file at repository root:
+```bash
+# Optional updates - run only if needed
+dotnet add src/Mockaco.AspNetCore/Mockaco.AspNetCore.csproj package Bogus
+dotnet add src/Mockaco.AspNetCore/Mockaco.AspNetCore.csproj package Serilog.AspNetCore
 
-```json
-{
-  "sdk": {
-    "version": "9.0.100",
-    "rollForward": "latestFeature"
-  }
-}
+dotnet add test/Mockaco.AspNetCore.Tests/Mockaco.AspNetCore.Tests.csproj package FluentAssertions
+dotnet add test/Mockaco.AspNetCore.Tests/Mockaco.AspNetCore.Tests.csproj package Moq
+dotnet add test/Mockaco.AspNetCore.Tests/Mockaco.AspNetCore.Tests.csproj package Testcontainers
+
+# ⚠️ CAUTION: Polly v8 has breaking changes
+# dotnet add src/Mockaco.AspNetCore/Mockaco.AspNetCore.csproj package Polly
+```
+
+### 3.4 Iterative Build Process
+
+Follow this workflow:
+
+1. **Build after MUST updates:**
+   ```bash
+   dotnet build
+   ```
+
+2. **If build fails, check error messages:**
+   - Package version conflicts? → Update that specific package
+   - Missing package? → Add it
+   - API breaking changes? → Move to Phase 4 (Code Changes)
+
+3. **If build succeeds, run tests:**
+   ```bash
+   dotnet test
+   ```
+
+4. **If tests fail with dependency errors:**
+   - Update specific packages from RECOMMENDED or CAN KEEP lists
+   - Re-run tests
+
+5. **Document any additional packages that needed updating**
+
+### 3.5 Package Update Reference
+
+**Quick reference for checking latest versions:**
+
+```bash
+# Check available versions of a package
+dotnet list package --outdated
+
+# Check specific package
+nuget list <package-name>
+
+# Or visit: https://www.nuget.org/packages/<package-name>
 ```
 
 ---
 
-## Phase 3: Code Changes
+## Phase 4: Code Changes
 
-### 3.1 Review and Fix Breaking Changes
+### 4.1 Review and Fix Breaking Changes
 
 **Known .NET 7-9 Breaking Areas:**
 
@@ -179,7 +248,7 @@ Create file at repository root:
   - Verify C# expression evaluation
   - Test block statements
 
-### 3.2 Fix Nullable Reference Warnings
+### 4.2 Fix Nullable Reference Warnings
 
 **Files to review:**
 
@@ -199,7 +268,7 @@ Create file at repository root:
 - Add null checks with proper guards
 - Mark fields as nullable if they can be null
 
-### 3.3 Fix Analyzer Issues
+### 4.3 Fix Analyzer Issues
 
 **Current Issue:**
 ```
@@ -214,9 +283,9 @@ threw an exception of type 'System.ArgumentException' with message 'Syntax node 
 
 ---
 
-## Phase 4: Update CI/CD & Infrastructure
+## Phase 5: Update CI/CD & Infrastructure
 
-### 4.1 Update GitHub Actions
+### 5.1 Update GitHub Actions
 
 **File:** `.github/workflows/main-release.yml`
 
@@ -247,7 +316,7 @@ Update other GitHub Actions to latest versions:
     versionSpec: '6.x'  # Updated from 5.x if available
 ```
 
-### 4.2 Update Dockerfile
+### 5.2 Update Dockerfile
 
 **File:** `src/Mockaco/Docker/Dockerfile`
 
@@ -268,7 +337,7 @@ FROM mcr.microsoft.com/dotnet/sdk:9.0-bookworm-slim AS build
 - Debian version: Changed from `bullseye` to `bookworm` (Debian 12)
 - Test multi-arch builds: `linux/amd64` and `linux/arm64`
 
-### 4.3 Update Other CI Files (if applicable)
+### 5.3 Update Other CI Files (if applicable)
 
 - [ ] Check for AppVeyor configuration
 - [ ] Check for Azure Pipelines configuration
@@ -277,9 +346,9 @@ FROM mcr.microsoft.com/dotnet/sdk:9.0-bookworm-slim AS build
 
 ---
 
-## Phase 5: Validation & Testing
+## Phase 6: Validation & Testing
 
-### 5.1 Local Validation
+### 6.1 Local Validation
 
 **Build Validation:**
 
@@ -316,7 +385,7 @@ dotnet test --configuration Release --collect:"XPlat Code Coverage"
 # Compare results with baseline_tests.log
 ```
 
-### 5.2 Functional Testing
+### 6.2 Functional Testing
 
 **Dotnet Tool Testing:**
 
@@ -382,7 +451,7 @@ mockaco --path ./src/Mockaco/Mocks
    - [ ] Test `application/x-www-form-urlencoded` requests
    - [ ] Test binary file uploads
 
-### 5.3 Docker Validation
+### 6.3 Docker Validation
 
 **Build and Test:**
 
@@ -421,7 +490,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 - [ ] Certificate handling works (HTTPS)
 - [ ] Environment variables applied correctly
 
-### 5.4 Performance Testing
+### 6.4 Performance Testing
 
 **Comparison Metrics (.NET 6 vs .NET 9):**
 
@@ -464,7 +533,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 - Better throughput (JIT improvements)
 - Lower memory (GC improvements)
 
-### 5.5 Integration Testing
+### 6.5 Integration Testing
 
 **Real-World Scenarios:**
 
@@ -495,9 +564,9 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 ---
 
-## Phase 6: Documentation Updates
+## Phase 7: Documentation Updates
 
-### 6.1 Update Project Documentation
+### 7.1 Update Project Documentation
 
 **Files to update:**
 
@@ -519,7 +588,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
   - Update pipeline descriptions
   - Note new GitHub Actions versions
 
-### 6.2 Create Migration Guide
+### 7.2 Create Migration Guide
 
 Create `MIGRATION_GUIDE.md` for users:
 
@@ -528,7 +597,7 @@ Create `MIGRATION_GUIDE.md` for users:
 - Required actions for users
 - FAQ section
 
-### 6.3 Update Package Metadata
+### 7.3 Update Package Metadata
 
 **NuGet Package Description:**
 
@@ -792,18 +861,19 @@ Given that .NET 9 is STS (Standard Term Support until May 2026), I recommend:
 
 ### Fast Track (Direct to .NET 9)
 - **Phase 1 (Preparation):** 1-2 days
-- **Phase 2 (Project Updates):** 0.5 day
-- **Phase 3 (Code Changes):** 1-2 days
-- **Phase 4 (CI/CD Updates):** 0.5 day
-- **Phase 5 (Validation):** 2-3 days
-- **Phase 6 (Documentation):** 1 day
+- **Phase 2 (Target Frameworks):** 0.25 day
+- **Phase 3 (Dependencies):** 0.5-1 day
+- **Phase 4 (Code Changes):** 1-2 days
+- **Phase 5 (CI/CD Updates):** 0.5 day
+- **Phase 6 (Validation):** 2-3 days
+- **Phase 7 (Documentation):** 1 day
 
-**Total:** 6-9 days
+**Total:** 6-10 days
 
 ### Recommended Track (via .NET 8)
-- **Phase 1-6 for .NET 8:** 6-9 days
+- **Phase 1-7 for .NET 8:** 6-10 days
 - **Stabilization period:** 1-2 weeks
-- **Phase 1-6 for .NET 9:** 4-6 days (faster, leverages .NET 8 work)
+- **Phase 1-7 for .NET 9:** 4-6 days (faster, leverages .NET 8 work)
 
 **Total:** 3-4 weeks
 
